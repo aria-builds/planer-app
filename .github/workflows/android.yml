@@ -36,12 +36,20 @@ jobs:
       #   ANDROID_KEYSTORE_BASE64   (the .keystore file, base64-encoded)
       #   ANDROID_KEYSTORE_PASSWORD
       #   ANDROID_KEY_ALIAS
-      - name: Decode keystore
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
-        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/release.keystore
+      - name: Decode keystore (if provided)
+        id: keystore
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > android/app/release.keystore
+            echo "has_keystore=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_keystore=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Add release signing config
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        if: steps.keystore.outputs.has_keystore == 'true'
         run: |
           python3 - << 'EOF'
           import re
@@ -67,27 +75,10 @@ jobs:
           EOF
 
       - name: Build signed release APK
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        if: steps.keystore.outputs.has_keystore == 'true'
         env:
           KS_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KS_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: cd android && ./gradlew assembleRelease
 
-      - name: Upload release APK
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: planner-apk-release
-          path: android/app/build/outputs/apk/release/app-release.apk
-
-      # --- Fallback: unsigned debug build, only runs if no keystore secret is set ---
-      - name: Build debug APK (no keystore configured)
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 == '' }}
-        run: cd android && ./gradlew assembleDebug
-
-      - name: Upload debug APK
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 == '' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: planner-apk-debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+      - name: Upload rel
